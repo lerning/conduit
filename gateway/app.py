@@ -63,6 +63,7 @@ class CompleteBody(BaseModel):
     max_tokens: int = Field(default=1024, ge=1, le=16000)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     stream: bool = False
+    json_response: bool = False          # structured passthrough (guaranteed JSON)
     user_id: str = "anonymous"           # decisions #4/#5: caller owns identity
     cache_bypass: bool = False           # decision #6: drift runs force live calls
 
@@ -78,7 +79,8 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
                     retry_base_delay_s=config.retry_base_delay_s)
     limiter = TokenBucketLimiter(config.ratelimit_capacity, config.ratelimit_refill_per_s)
     cache = ExactCache(enabled=config.cache_enabled, ttl_s=config.cache_ttl_s)
-    ledger = LedgerStore(get_ledger_table(use_real_aws=config.use_real_aws))
+    ledger = LedgerStore(get_ledger_table(use_real_aws=config.use_real_aws,
+                                          db_path=config.db_path))
 
     app.state.config = config
     app.state.ledger = ledger
@@ -128,9 +130,10 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
 
         messages = [Message(role=m.role, content=m.content) for m in body.messages]
         creq = CompletionRequest(model="", messages=messages,
-                                 max_tokens=body.max_tokens, temperature=body.temperature)
+                                 max_tokens=body.max_tokens, temperature=body.temperature,
+                                 json_response=body.json_response)
         key = request_hash(body.tier, [m.model_dump() for m in body.messages],
-                           body.max_tokens, body.temperature)
+                           body.max_tokens, body.temperature, body.json_response)
         client_id = f"{app_name}:{body.user_id}"
 
         if body.stream:

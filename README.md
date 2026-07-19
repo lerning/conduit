@@ -99,7 +99,12 @@ request
 - ⬜ **P5** — benchmark + chaos harness with the before/after report and timeline artifacts.
 - ⬜ Real-AWS mode (DynamoDB tables via IaC; `storage.py` interface already matches), deploy/teardown.
 
-**Known v1 limits (deliberate, documented):** in-process cache/limiter/ledger state — correct for a
-single instance, resets on restart (the daily cap is therefore dev-grade until real-AWS mode);
-mid-stream failures end the stream rather than failing over; costs for mock-backed models are
-simulated from the real price table so the meter demos honestly at $0 actual spend.
+**v1.1:** durable **SQLite ledger** (the daily hard cap now survives restarts — see
+`docs/DEPLOYMENT.md` for why SQLite is the right-sized production store here, with DynamoDB as the
+documented multi-instance path) and a **structured-output passthrough** (`json_response: true` →
+guaranteed JSON via forced tool-use / response_format; content-blind), which is what let the first
+real tenant — Inner Council's `ConduitBackend` — move in.
+
+**Known limits (deliberate, documented):** cache/limiter state is in-process (single-instance
+shape); mid-stream failures end the stream rather than failing over; costs for mock-backed models
+are simulated from the real price table so the meter demos honestly at $0 actual spend.

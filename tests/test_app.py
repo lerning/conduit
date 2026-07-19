@@ -127,3 +127,23 @@ def test_health_reports_shape():
     assert h["status"] == "ok"
     assert "mock" in h["providers"]
     assert set(h["tiers"]) == {"fast", "quality"}
+
+
+def test_json_response_passthrough_and_distinct_cache_key():
+    import json as _json
+    client = make_client(cache_enabled=True)
+    plain = client.post("/v1/complete", json=BODY).json()
+    structured = client.post("/v1/complete", json={**BODY, "json_response": True}).json()
+    data = _json.loads(structured["text"])          # guaranteed-JSON contract
+    assert data["mock"] is True
+    # same messages but different json flag must NOT share a cache entry
+    assert structured["cache_hit"] is False and plain["text"] != structured["text"]
+
+
+def test_ledger_survives_restart_via_sqlite(tmp_path):
+    db = str(tmp_path / "conduit.db")
+    c1 = make_client(db_path=db)
+    r = c1.post("/v1/complete", json=BODY)
+    assert r.status_code == 200
+    c2 = make_client(db_path=db)                    # "restarted" service, same file
+    assert c2.get("/v1/usage").json()["requests_today"] == 1

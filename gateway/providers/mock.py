@@ -60,6 +60,9 @@ class MockProvider:
         last_user = next((m.content for m in reversed(request.messages)
                           if m.role == "user"), "")
         digest = hashlib.md5(last_user.encode()).hexdigest()[:8]
+        if request.json_response:
+            import json
+            return json.dumps({"mock": True, "model": request.model, "ack": digest})
         return f"[mock:{request.model}] ack({digest}): {last_user[:80]}"
 
     def _usage(self, request: CompletionRequest, text: str) -> Usage:

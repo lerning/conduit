@@ -185,3 +185,31 @@ def test_ledger_roundtrip_and_day_totals():
 def test_cost_table_math():
     assert compute_cost("claude-haiku-4-5-20251001", 1000, 1000) == pytest.approx(0.006)
     assert compute_cost("unknown-model", 99999, 99999) == 0.0
+
+
+# --- sqlite durable ledger (D2) ---------------------------------------------------
+def test_sqlite_table_persists_across_reopen(tmp_path):
+    from gateway.storage import SqliteTable
+    db = str(tmp_path / "ledger.db")
+    store1 = LedgerStore(SqliteTable(db))
+    e = LedgerEntry(client_id="ic:joshua", model="claude-haiku-4-5-20251001",
+                    provider="anthropic", input_tokens=100, output_tokens=50,
+                    cost_usd=compute_cost("claude-haiku-4-5-20251001", 100, 50))
+    store1.put(e)
+    # simulate a process restart: brand-new connection to the same file
+    store2 = LedgerStore(SqliteTable(db))
+    row = store2.get(e.request_id)
+    assert row is not None and row["client_id"] == "ic:joshua"
+    totals = store2.day_totals()
+    assert totals["requests"] == 1 and totals["spend_usd"] > 0  # cap survives restart
+
+
+# --- structured json passthrough ---------------------------------------------------
+def test_mock_json_response_is_valid_json():
+    import json as _json
+    p = MockProvider()
+    req = CompletionRequest(model="m", json_response=True,
+                            messages=[Message(role="user", content="give me json")])
+    resp = run(p.complete(req))
+    data = _json.loads(resp.text)
+    assert data["mock"] is True and data["model"] == "m"

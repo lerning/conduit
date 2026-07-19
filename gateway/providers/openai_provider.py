@@ -30,11 +30,16 @@ class OpenAIProvider:
         return e
 
     async def complete(self, request: CompletionRequest) -> CompletionResponse:
+        kwargs: dict = {}
+        if request.json_response:
+            # Requires the word "json" somewhere in the messages (OpenAI rule);
+            # structured callers' prompts satisfy this by construction.
+            kwargs["response_format"] = {"type": "json_object"}
         try:
             resp = await self._client.chat.completions.create(
                 model=request.model,
                 messages=[{"role": m.role, "content": m.content} for m in request.messages],
-                max_tokens=request.max_tokens, temperature=request.temperature,
+                max_tokens=request.max_tokens, temperature=request.temperature, **kwargs,
             )
         except Exception as e:
             raise self._map_error(e) from e

@@ -75,7 +75,9 @@ class Config:
     breaker_cooldown_s: float = 30.0
     provider_timeout_s: float = 30.0
 
-    # storage
+    # storage. None = in-memory (tests/ephemeral); from_env defaults to a durable
+    # SQLite file so a *running service's* spend cap survives restarts (D2).
+    db_path: str | None = None
     use_real_aws: bool = False
 
     @classmethod
@@ -91,5 +93,6 @@ class Config:
         c.ratelimit_refill_per_s = float(os.getenv("CONDUIT_RATELIMIT_REFILL_PER_S", "2.0"))
         c.cache_enabled = os.getenv("CONDUIT_CACHE_ENABLED", "0") == "1"
         c.cache_ttl_s = int(os.getenv("CONDUIT_CACHE_TTL_S", "300"))
+        c.db_path = os.getenv("CONDUIT_DB_PATH", "data/conduit.db")
         c.use_real_aws = os.getenv("CONDUIT_USE_REAL_AWS", "0") == "1"
         return c

@@ -22,10 +22,10 @@ from typing import Any, Optional
 
 
 def request_hash(tier: str, messages: list[dict], max_tokens: int,
-                 temperature: float) -> str:
+                 temperature: float, json_response: bool = False) -> str:
     canonical = json.dumps(
         {"tier": tier, "messages": messages, "max_tokens": max_tokens,
-         "temperature": temperature},
+         "temperature": temperature, "json": json_response},
         sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 

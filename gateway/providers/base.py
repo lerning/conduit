@@ -24,6 +24,11 @@ class CompletionRequest:
     max_tokens: int = 1024
     temperature: float = 0.7
     stream: bool = False
+    # Structured-output passthrough (content-blind: the gateway forwards the
+    # constraint, it never reads the content). True -> the response text is
+    # guaranteed to be a JSON object (forced tool-use on Anthropic,
+    # response_format on OpenAI, deterministic JSON on the mock).
+    json_response: bool = False
     idempotency_key: str | None = None
 
 

@@ -32,17 +32,37 @@ class AnthropicProvider:
         return e
 
     async def complete(self, request: CompletionRequest) -> CompletionResponse:
+        kwargs: dict = dict(
+            model=request.model,
+            messages=[{"role": m.role, "content": m.content} for m in request.messages
+                      if m.role != "system"],
+            system=next((m.content for m in request.messages if m.role == "system"), None) or "",
+            max_tokens=request.max_tokens,
+        )
+        # Opus 4.8 deprecated the temperature param; omit for models that reject it.
+        if "opus-4-8" not in request.model:
+            kwargs["temperature"] = request.temperature
+        if request.json_response:
+            # Forced tool-use guarantees a valid JSON object back -- the caller's
+            # system prompt describes the shape; the schema stays permissive.
+            kwargs["tools"] = [{
+                "name": "respond",
+                "description": "Return your structured answer as a JSON object, using "
+                               "exactly the fields described in the system instructions.",
+                "input_schema": {"type": "object", "additionalProperties": True},
+            }]
+            kwargs["tool_choice"] = {"type": "tool", "name": "respond"}
         try:
-            resp = await self._client.messages.create(
-                model=request.model,
-                messages=[{"role": m.role, "content": m.content} for m in request.messages
-                         if m.role != "system"],
-                system=next((m.content for m in request.messages if m.role == "system"), None) or "",
-                max_tokens=request.max_tokens, temperature=request.temperature,
-            )
+            resp = await self._client.messages.create(**kwargs)
         except Exception as e:
             raise self._map_error(e) from e
-        text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        if request.json_response:
+            import json as _json
+            data = next((b.input for b in resp.content
+                         if getattr(b, "type", None) == "tool_use"), {})
+            text = _json.dumps(data)
+        else:
+            text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
         return CompletionResponse(
             text=text, model=request.model, provider=self.name,
             usage=Usage(input_tokens=resp.usage.input_tokens,

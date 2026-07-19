@@ -75,6 +75,7 @@ class Router:
             req = CompletionRequest(model=model, messages=request.messages,
                                     max_tokens=request.max_tokens,
                                     temperature=request.temperature,
+                                    json_response=request.json_response,
                                     idempotency_key=request.idempotency_key)
             try:
                 resp = await with_retry(lambda: provider.complete(req),
