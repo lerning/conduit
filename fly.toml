@@ -1,0 +1,45 @@
+# Conduit — PRIVATE Fly app (no public ports).
+#
+# Reachable only over Fly's private network (6PN) at:
+#     http://conduit-gateway.internal:8200
+# by any app in the same Fly org. A future project needs no Conduit changes —
+# it just points at that hostname and presents its own X-API-Key.
+#
+# Deliberately NO [http_service] block: that is what keeps it off the public
+# internet. Auth (per-app API keys) is still enabled as defense in depth.
+#
+# First-time setup (run from this directory):
+#   fly launch --no-deploy --name conduit-gateway     # or: fly apps create conduit-gateway
+#   fly volumes create conduit_data --size 1 --region sjc
+#   fly secrets set ANTHROPIC_API_KEY=... OPENAI_API_KEY=... \
+#                   CONDUIT_API_KEYS="ic:<random-long-key>"
+#   fly deploy
+
+app = "conduit-gateway"
+primary_region = "sjc"          # change to your nearest region
+
+[build]
+
+[env]
+  CONDUIT_DB_PATH = "/data/conduit.db"
+  # Hard daily ceiling across ALL apps behind the gateway. Enforced in-process
+  # (402), fails closed if the ledger is unreadable. Tune to taste.
+  CONDUIT_GLOBAL_DAILY_CAP_USD = "2.00"
+  CONDUIT_USER_DAILY_CAP_USD = "0.50"
+  # Cache ships off (observability-first). Flip to "1" once you want the savings.
+  CONDUIT_CACHE_ENABLED = "0"
+  CONDUIT_CACHE_TTL_S = "300"
+  CONDUIT_RATELIMIT_CAPACITY = "20"
+  CONDUIT_RATELIMIT_REFILL_PER_S = "2.0"
+
+# Durable ledger — the spend cap is only a real safety mechanism if it survives
+# restarts, so this volume is required, not optional.
+[mounts]
+  source = "conduit_data"
+  destination = "/data"
+
+# Always on: private apps aren't woken by Fly's public proxy, so auto-stop would
+# make IC's first call fail. It's tiny (~$2/mo) — keep it up.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
