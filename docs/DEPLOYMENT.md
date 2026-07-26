@@ -1,7 +1,26 @@
-# Deployment Plan — Conduit + Inner Council on Fly.io
+# Deployment — Conduit + Inner Council on Fly.io
 
-**Status: prepped, not deployed.** Dockerfiles and `fly.toml`s exist and the wiring is verified
-locally; no Fly account, no cloud resources, $0 spent. Deploying is a deliberate later step.
+**Status: DEPLOYED and verified in production.**
+
+| App | URL / address | Visibility |
+|---|---|---|
+| `inner-council` | https://inner-council.fly.dev | public (HTTPS) |
+| `conduit-gateway` | `http://conduit-gateway.internal:8200` | **private (6PN only)** |
+
+Verified live: IC over HTTPS → private gateway over 6PN → metered in the ledger, with the global
+daily cap reading `$1.00`. Both volumes are encrypted at rest by Fly.
+
+**Still to do before inviting anyone:** set the provider secret (see "Secrets" below — the deploy
+currently runs on Conduit's mock provider), lower/confirm caps, per-user identity, app-level
+encryption.
+
+## ⚠️ The one real deployment gotcha (hit and fixed)
+
+**Fly's private network (6PN) is IPv6-only.** Conduit originally bound `0.0.0.0` (IPv4), so IC's
+calls to `conduit-gateway.internal` failed with `httpx.ConnectError: [Errno 111] Connection
+refused` — DNS resolved fine, nothing was listening on the v6 address. The fix is in the
+Dockerfile: **bind `::`, not `0.0.0.0`**, for any Fly app that sibling apps reach privately.
+(Public apps behind Fly's proxy don't hit this — which is why IC worked immediately.)
 
 **Constraints driving every choice:** a few trusted, infrequent users; interview-impressive but
 sensible; **infra budget ≤ $5–10/month**; LLM spend (not infra) is the real financial risk, and
@@ -55,7 +74,25 @@ slightly worse first impression, which is why it's off by default). Conduit stay
 proxy wakes public apps, but a private 6PN app won't auto-start, so stopping it would break IC's
 first call.
 
-## Deploy sequence (when you're ready)
+## Secrets (the remaining step — run these yourself; they're your credentials)
+
+The apps are deployed but Conduit has no provider key, so it's serving from its mock. To go live
+on real models:
+
+```bash
+# 1. generate a shared key and give it to Conduit (run from conduit/)
+KEY=$(openssl rand -hex 24)
+fly secrets set CONDUIT_API_KEYS="ic:$KEY" --app conduit-gateway
+fly secrets set ANTHROPIC_API_KEY="$(grep '^ANTHROPIC_API_KEY=' ../inner_council/.env | cut -d= -f2-)" --app conduit-gateway
+
+# 2. give IC the same key
+fly secrets set IC_CONDUIT_API_KEY="$KEY" --app inner-council
+```
+
+Each `fly secrets set` triggers an automatic restart. After that, Conduit routes to real Anthropic
+and requires the API key from IC.
+
+## Deploy sequence (reference)
 
 Both directories already contain a `Dockerfile` and `fly.toml`. Docker isn't needed locally — Fly
 builds remotely.

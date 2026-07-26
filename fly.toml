@@ -24,7 +24,7 @@ primary_region = "sjc"          # change to your nearest region
   CONDUIT_DB_PATH = "/data/conduit.db"
   # Hard daily ceiling across ALL apps behind the gateway. Enforced in-process
   # (402), fails closed if the ledger is unreadable. Tune to taste.
-  CONDUIT_GLOBAL_DAILY_CAP_USD = "2.00"
+  CONDUIT_GLOBAL_DAILY_CAP_USD = "1.00"
   CONDUIT_USER_DAILY_CAP_USD = "0.50"
   # Cache ships off (observability-first). Flip to "1" once you want the savings.
   CONDUIT_CACHE_ENABLED = "0"
