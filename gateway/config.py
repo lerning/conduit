@@ -73,7 +73,10 @@ class Config:
     retry_base_delay_s: float = 0.2
     breaker_failure_threshold: int = 5
     breaker_cooldown_s: float = 30.0
-    provider_timeout_s: float = 30.0
+    # Long-form generations (a multi-paragraph reflection over a full transcript)
+    # legitimately run past 30s. Too tight a timeout turns a working call into a
+    # retry storm and then a 502.
+    provider_timeout_s: float = 120.0
 
     # storage. None = in-memory (tests/ephemeral); from_env defaults to a durable
     # SQLite file so a *running service's* spend cap survives restarts (D2).
