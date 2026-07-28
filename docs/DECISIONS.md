@@ -104,6 +104,18 @@ Legend: ✅ RESOLVED (with the answer) · 🟡 OPEN (still needs a call)
    judgment change." Required: a short TTL and/or an explicit cache-bypass flag the drift run
    always sets.
 
+   **Implemented (cache-on, v1.5).** The bypass flag turned out to need to be *per task*, not one
+   global switch. IC derives it from the `[[TASK:...]]` tag already in the system prompt
+   (`_NEVER_CACHE_TASKS` in `app/llm_client.py`), and forces a live call for two disjoint reasons:
+   *correctness* for the safety classifiers and eval judges — a cached verdict is a verdict nobody
+   ran, and within the TTL two different people typing the same sentence would share one screening;
+   *non-determinism* for the generative turns (`part_agent`, `orchestrator`, `post_session`), which
+   run at temp 0.85 specifically so the room differs every time — an exact-cache hit there replays a
+   previous session verbatim, which is a visible regression rather than a saving. What remains
+   cacheable is low-temperature structured extraction (intake, routing, tagging, enrichment), where
+   an identical request genuinely should give an identical answer. `IC_CONDUIT_CACHE_BYPASS=1`
+   survives as the whole-pipeline override for drift runs.
+
 ### C. Rollout order
 
 7. **✅ RESOLVED — Eval harness is the first tenant**, not friend traffic. It's real app traffic
@@ -112,6 +124,9 @@ Legend: ✅ RESOLVED (with the answer) · 🟡 OPEN (still needs a call)
 8. **✅ RESOLVED — Read-only (observability/ledger) first**, then flip on caching/retry once
    there's a baseline number to measure "before" against. **Remember this decision when
    sequencing implementation** — Joshua flagged this explicitly as easy to forget.
+
+   **Done (v1.5).** The read-only period ran through v1.1–v1.4; `CONDUIT_CACHE_ENABLED` is now
+   `"1"` in `fly.toml`, with the per-task bypass policy from #6 deciding what is eligible.
 
 ### D. Privacy & security
 

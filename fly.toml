@@ -26,8 +26,10 @@ primary_region = "sjc"          # change to your nearest region
   # (402), fails closed if the ledger is unreadable. Tune to taste.
   CONDUIT_GLOBAL_DAILY_CAP_USD = "1.00"
   CONDUIT_USER_DAILY_CAP_USD = "0.50"
-  # Cache ships off (observability-first). Flip to "1" once you want the savings.
-  CONDUIT_CACHE_ENABLED = "0"
+  # Cache ON. Callers decide what is cacheable: Conduit honors a per-request
+  # cache_bypass flag, and IC sets it for safety classifiers and creative
+  # dialogue turns (decision #6). Nothing here is a blanket "cache everything".
+  CONDUIT_CACHE_ENABLED = "1"
   CONDUIT_CACHE_TTL_S = "300"
   CONDUIT_RATELIMIT_CAPACITY = "20"
   CONDUIT_RATELIMIT_REFILL_PER_S = "2.0"
