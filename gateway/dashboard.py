@@ -105,8 +105,18 @@ def _sparkline(buckets: list[tuple[str, float]], color: str) -> str:
 
 
 def build_html(ledger, config, cache, breakers, window_h: int = 24,
-               banner: str = "") -> str:
+               banner: str = "", refresh_s: int = 0) -> str:
+    """refresh_s > 0 makes the page reload itself and say so.
+
+    Without it the page is a static render that looks identical whether it is
+    two seconds or two days old -- which reads as "the dashboard is broken" the
+    first time you generate traffic and the numbers don't move. The live route
+    sets it; file snapshots leave it at 0 and are labelled as snapshots."""
     now = time.time()
+    stamp = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%H:%M:%S")
+    freshness = (f"updated {stamp} UTC · refreshing every {refresh_s}s"
+                 if refresh_s else
+                 f"static snapshot taken {stamp} UTC — it does not update")
     since = now - window_h * 3600
     rows = ledger.rows_since(since)
     served = [r for r in rows if str(r.get("outcome", OUTCOME_OK)) not in REJECTIONS]
@@ -195,6 +205,7 @@ def build_html(ledger, config, cache, breakers, window_h: int = 24,
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+{f'<meta http-equiv="refresh" content="{refresh_s}">' if refresh_s else ''}
 <title>Conduit — Gateway Operations</title>
 <style>
 :root{{--bg:#f7f7f9;--panel:#fff;--ink:#23262b;--muted:#6a7078;--line:#e3e5ea;
@@ -234,6 +245,11 @@ code{{background:color-mix(in srgb,var(--line) 55%,transparent);padding:1px 5px;
   overflow:hidden;margin-top:7px}}
 .meter i{{display:block;height:100%;border-radius:99px}}
 .note{{border-left:3px solid var(--blue);padding-left:11px;margin-top:11px}}
+.dot{{display:inline-block;width:7px;height:7px;border-radius:99px;background:var(--ok);
+  margin-right:7px;vertical-align:middle;animation:pulse 2s ease-in-out infinite}}
+.dot.still{{background:var(--muted);animation:none}}
+@keyframes pulse{{50%{{opacity:.25}}}}
+@media (prefers-reduced-motion:reduce){{.dot{{animation:none}}}}
 .banner{{margin:13px 0 0;padding:9px 13px;border-radius:8px;font-size:13px;
   background:color-mix(in srgb,var(--warn) 14%,transparent);
   border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);color:var(--ink)}}
@@ -242,6 +258,7 @@ code{{background:color-mix(in srgb,var(--line) 55%,transparent);padding:1px 5px;
 <div class="wrap">
   <h1>Conduit — Gateway Operations</h1>
   <p class="lede">Last {window_h}h · {len(rows)} requests · metadata only, never message content</p>
+  <p class="lede sm"><span class="dot{'' if refresh_s else ' still'}"></span>{freshness}</p>
   {f'<p class="banner">{html.escape(banner)}</p>' if banner else ''}
 
   <h2>Spend &amp; budget</h2>

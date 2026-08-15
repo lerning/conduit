@@ -288,7 +288,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
 
     if config.dashboard_enabled:
         @app.get("/v1/dashboard", response_class=HTMLResponse)
-        def dashboard(hours: int = 24):
+        def dashboard(hours: int = 24, refresh: int = 30):
             """Operations view: spend, tenant concentration, throttles, breakers.
 
             Deliberately not behind X-API-Key: it is a browser page on a service
@@ -297,8 +297,13 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             ledger -- there is no message content in it to leak. Kill the route
             with CONDUIT_DASHBOARD_ENABLED=0."""
             from gateway.dashboard import build_html
-            return HTMLResponse(build_html(ledger, config, cache, breakers,
-                                           window_h=max(1, min(hours, 24 * 30))))
+            # no-store: an ops page served from the browser cache is worse than
+            # no ops page -- it shows stale numbers with no sign they're stale.
+            return HTMLResponse(
+                build_html(ledger, config, cache, breakers,
+                           window_h=max(1, min(hours, 24 * 30)),
+                           refresh_s=max(0, min(refresh, 3600))),
+                headers={"Cache-Control": "no-store, max-age=0"})
 
     @app.get("/health")
     def health():

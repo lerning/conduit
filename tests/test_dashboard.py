@@ -125,6 +125,21 @@ def test_dashboard_separates_served_from_refused_in_the_header():
     assert "1 refused" in page or ">1<" in page   # header counts, not lumped in
 
 
+def test_live_route_auto_refreshes_and_is_never_cached():
+    """A static ops page that looks identical at two seconds and two days old
+    reads as a broken dashboard the first time traffic doesn't appear."""
+    r = make_client().get("/v1/dashboard")
+    assert 'http-equiv="refresh" content="30"' in r.text
+    assert "refreshing every 30s" in r.text
+    assert "no-store" in r.headers["cache-control"]
+
+
+def test_file_snapshot_says_it_is_a_snapshot():
+    page = _html(make_client())            # refresh_s defaults to 0
+    assert "http-equiv=\"refresh\"" not in page
+    assert "does not update" in page
+
+
 def test_banner_is_escaped_and_shown():
     page = _html(make_client(), banner="drill <b>x</b>")
     assert "drill &lt;b&gt;x&lt;/b&gt;" in page
