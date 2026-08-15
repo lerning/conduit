@@ -130,7 +130,11 @@ def build_html(ledger, config, cache, breakers, window_h: int = 24,
         c["tok"] += int(r.get("input_tokens", 0)) + int(r.get("output_tokens", 0))
         c["spend"] += float(r.get("cost_usd", 0))
     ranked = sorted(by_client.items(), key=lambda kv: -kv[1]["spend"])
-    top_share = _pct(ranked[0][1]["spend"], spend) if ranked and spend else 0.0
+    concentration = (f"Concentration is the thing to watch — <strong>top tenant is "
+                     f"{_pct(ranked[0][1]['spend'], spend):.0f}% of spend</strong>."
+                     if ranked and spend else
+                     "Concentration is the thing to watch; there is no traffic to "
+                     "concentrate yet.")
 
     tenant_rows = ""
     for cid, d in ranked[:12]:
@@ -265,8 +269,7 @@ code{{background:color-mix(in srgb,var(--line) 55%,transparent);padding:1px 5px;
   <div class="card">
     <p class="muted sm" style="margin-top:0">Rate limiting is keyed on <code>app:user</code>, not
     source IP: behind a private network every request shares one address, so an IP bucket would let
-    a single noisy tenant throttle everyone. Concentration is the thing to watch —
-    <strong>top tenant is {top_share:.0f}% of spend</strong>.</p>
+    a single noisy tenant throttle everyone. {concentration}</p>
     <table><tr><th>tenant</th><th class="n">served</th><th class="n">tokens</th>
       <th class="n">spend</th><th class="n">share</th><th class="n">of own cap</th>
       <th class="n">refused</th></tr>
