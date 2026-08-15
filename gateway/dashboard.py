@@ -104,8 +104,24 @@ def _sparkline(buckets: list[tuple[str, float]], color: str) -> str:
             f'{html.escape(buckets[-1][0])}</text></svg>')
 
 
+def _controls(window_h: int, refresh_s: int) -> str:
+    """Window + refresh links. Plain anchors, no JS: a link to the same URL IS
+    a refresh, and pausing is just refresh=0."""
+    def link(label, h, r, on):
+        cls = " on" if on else ""
+        return f'<a class="ctl{cls}" href="?hours={h}&amp;refresh={r}">{label}</a>'
+
+    windows = "".join(link(lbl, h, refresh_s, h == window_h)
+                      for lbl, h in (("1h", 1), ("24h", 24), ("7d", 168), ("30d", 720)))
+    auto = (link("pause auto-refresh", window_h, 0, False) if refresh_s
+            else link("auto-refresh 30s", window_h, 30, False))
+    return (f'<div class="ctls"><span class="ctl-lbl">window</span>{windows}'
+            f'<span class="ctl-gap"></span>'
+            f'{link("refresh now", window_h, refresh_s, False)}{auto}</div>')
+
+
 def build_html(ledger, config, cache, breakers, window_h: int = 24,
-               banner: str = "", refresh_s: int = 0) -> str:
+               banner: str = "", refresh_s: int = 0, controls: bool = False) -> str:
     """refresh_s > 0 makes the page reload itself and say so.
 
     Without it the page is a static render that looks identical whether it is
@@ -114,9 +130,12 @@ def build_html(ledger, config, cache, breakers, window_h: int = 24,
     sets it; file snapshots leave it at 0 and are labelled as snapshots."""
     now = time.time()
     stamp = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%H:%M:%S")
-    freshness = (f"updated {stamp} UTC · refreshing every {refresh_s}s"
-                 if refresh_s else
-                 f"static snapshot taken {stamp} UTC — it does not update")
+    if refresh_s:
+        freshness = f"updated {stamp} UTC · refreshing every {refresh_s}s"
+    elif controls:
+        freshness = f"updated {stamp} UTC · auto-refresh off"
+    else:
+        freshness = f"static snapshot taken {stamp} UTC — it does not update"
     since = now - window_h * 3600
     rows = ledger.rows_since(since)
     served = [r for r in rows if str(r.get("outcome", OUTCOME_OK)) not in REJECTIONS]
@@ -245,6 +264,15 @@ code{{background:color-mix(in srgb,var(--line) 55%,transparent);padding:1px 5px;
   overflow:hidden;margin-top:7px}}
 .meter i{{display:block;height:100%;border-radius:99px}}
 .note{{border-left:3px solid var(--blue);padding-left:11px;margin-top:11px}}
+.ctls{{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:13px 0 0}}
+.ctl-lbl{{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+  margin-right:3px}}
+.ctl-gap{{flex:1;min-width:14px}}
+a.ctl{{font-size:12.5px;text-decoration:none;color:var(--muted);padding:3px 10px;
+  border:1px solid var(--line);border-radius:99px;background:var(--panel)}}
+a.ctl:hover{{color:var(--ink);border-color:var(--muted)}}
+a.ctl.on{{color:var(--ink);border-color:var(--blue);
+  background:color-mix(in srgb,var(--blue) 14%,transparent)}}
 .dot{{display:inline-block;width:7px;height:7px;border-radius:99px;background:var(--ok);
   margin-right:7px;vertical-align:middle;animation:pulse 2s ease-in-out infinite}}
 .dot.still{{background:var(--muted);animation:none}}
@@ -259,6 +287,7 @@ code{{background:color-mix(in srgb,var(--line) 55%,transparent);padding:1px 5px;
   <h1>Conduit — Gateway Operations</h1>
   <p class="lede">Last {window_h}h · {len(rows)} requests · metadata only, never message content</p>
   <p class="lede sm"><span class="dot{'' if refresh_s else ' still'}"></span>{freshness}</p>
+  {_controls(window_h, refresh_s) if controls else ''}
   {f'<p class="banner">{html.escape(banner)}</p>' if banner else ''}
 
   <h2>Spend &amp; budget</h2>

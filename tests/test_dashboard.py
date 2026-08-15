@@ -134,6 +134,23 @@ def test_live_route_auto_refreshes_and_is_never_cached():
     assert "no-store" in r.headers["cache-control"]
 
 
+def test_auto_refresh_can_be_paused_and_resumed_from_the_page():
+    client = make_client()
+    live = client.get("/v1/dashboard").text
+    assert 'href="?hours=24&amp;refresh=0"' in live      # pause link
+
+    paused = client.get("/v1/dashboard?refresh=0")
+    assert 'http-equiv="refresh"' not in paused.text     # timer really is off
+    assert "auto-refresh off" in paused.text
+    assert 'href="?hours=24&amp;refresh=30"' in paused.text  # resume link
+
+
+def test_window_links_preserve_the_refresh_setting():
+    page = make_client().get("/v1/dashboard?hours=1&refresh=0").text
+    assert 'href="?hours=168&amp;refresh=0"' in page
+    assert "Last 1h" in page
+
+
 def test_file_snapshot_says_it_is_a_snapshot():
     page = _html(make_client())            # refresh_s defaults to 0
     assert "http-equiv=\"refresh\"" not in page

@@ -302,7 +302,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             return HTMLResponse(
                 build_html(ledger, config, cache, breakers,
                            window_h=max(1, min(hours, 24 * 30)),
-                           refresh_s=max(0, min(refresh, 3600))),
+                           refresh_s=max(0, min(refresh, 3600)), controls=True),
                 headers={"Cache-Control": "no-store, max-age=0"})
 
     @app.get("/health")
