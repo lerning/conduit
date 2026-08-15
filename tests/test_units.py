@@ -184,7 +184,10 @@ def test_ledger_roundtrip_and_day_totals():
 
 def test_cost_table_math():
     assert compute_cost("claude-haiku-4-5-20251001", 1000, 1000) == pytest.approx(0.006)
-    assert compute_cost("unknown-model", 99999, 99999) == 0.0
+    # An unpriced model must NOT be free: cost 0 means it consumes no budget,
+    # so the spend cap can never stop it. This assertion used to require 0.0 --
+    # it was pinning a fail-open hole in place.
+    assert compute_cost("unknown-model", 99999, 99999) > 0.0
 
 
 # --- sqlite durable ledger (D2) ---------------------------------------------------

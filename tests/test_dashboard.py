@@ -201,3 +201,35 @@ def test_load_drill_trips_every_protection():
     assert s["by_outcome"].get("provider_failed", 0) > 0
     assert s["failovers"] > 0
     assert "open" in s["breakers"].values()
+
+
+# --- cost table: these numbers ARE the spend cap ---------------------------
+
+def test_opus_is_priced_at_its_published_rate():
+    """Regression: Opus was priced at $15/$75 per MTok when the real rate is
+    $5/$25 -- a 3x overcharge that made the cap trip at a third of the budget
+    and every reported cost figure wrong."""
+    from gateway.telemetry.ledger import compute_cost
+    # 1M in + 1M out at $5/$25
+    assert compute_cost("claude-opus-4-8", 1_000_000, 1_000_000) == 30.0
+    assert compute_cost("claude-opus-5", 1_000_000, 1_000_000) == 30.0
+    assert compute_cost("claude-sonnet-4-6", 1_000_000, 1_000_000) == 18.0
+    assert compute_cost("claude-haiku-4-5", 1_000_000, 1_000_000) == 6.0
+
+
+def test_unpriced_model_is_charged_not_free():
+    """An unpriced model used to cost $0 -- it consumed no budget, so the cap
+    could never stop it. Fail-open in a fail-closed system."""
+    from gateway.telemetry.ledger import compute_cost
+    assert compute_cost("some-model-shipped-tomorrow", 1_000_000, 0) > 0
+
+
+def test_an_unpriced_model_cannot_slip_past_the_cap():
+    cfg = Config(global_daily_cap_usd=0.01,
+                 tier_map={"fast": [("mock", "not-in-the-cost-table")]})
+    client = TestClient(create_app(cfg))
+    r = client.post("/v1/complete", json={
+        "tier": "fast", "user_id": "u",
+        "messages": [{"role": "user", "content": "x" * 4000}], "max_tokens": 1000})
+    assert r.status_code == 200
+    assert r.json()["cost_usd"] > 0          # charged, so the cap can see it

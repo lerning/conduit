@@ -19,21 +19,54 @@ from typing import Optional
 
 TABLE_NAME = "conduit-ledger"
 
-# $ per 1K tokens (input, output). Extend as models are added. Used for cost
-# computation in the ledger and the benchmark's cost-delta report (spec §4).
+# $ per 1K tokens (input, output) at published list rates. Used for the ledger,
+# the spend caps, and the benchmark's cost-delta report (spec §4).
+#
+# These numbers ARE the spend cap. A wrong rate here doesn't show up as a bug --
+# it shows up as a cap that trips at the wrong time and a dashboard that lies
+# with confidence. Verified against Anthropic's published pricing 2026-08-15.
 COST_TABLE: dict[str, tuple[float, float]] = {
-    "claude-haiku-4-5-20251001": (0.001, 0.005),
+    # Anthropic -- $5/$25 per MTok for the Opus tier, $3/$15 Sonnet, $1/$5 Haiku
+    "claude-opus-5": (0.005, 0.025),
+    "claude-opus-4-8": (0.005, 0.025),
+    "claude-fable-5": (0.010, 0.050),
+    "claude-sonnet-5": (0.003, 0.015),      # list rate; intro pricing is lower
     "claude-sonnet-4-6": (0.003, 0.015),
-    "claude-opus-4-8": (0.015, 0.075),
+    "claude-haiku-4-5": (0.001, 0.005),
+    "claude-haiku-4-5-20251001": (0.001, 0.005),
+    # OpenAI
     "gpt-4o": (0.0025, 0.01),
     "gpt-4o-mini": (0.00015, 0.0006),
     "mock": (0.0, 0.0),
 }
 
+# An unpriced model used to cost $0, which meant it consumed no budget and the
+# cap could never stop it -- a fail-OPEN hole in a system whose whole design
+# premise is failing closed. Unknown models now price at the most expensive
+# known rate: a new model over-counts against the cap until it's added here,
+# which is the safe direction to be wrong in.
+_FALLBACK_RATE = max(COST_TABLE.values())
+
 
 def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    in_rate, out_rate = COST_TABLE.get(model, (0.0, 0.0))
+    if model in COST_TABLE:
+        in_rate, out_rate = COST_TABLE[model]
+    else:
+        in_rate, out_rate = _FALLBACK_RATE
+        _log_unpriced(model)
     return round(input_tokens / 1000 * in_rate + output_tokens / 1000 * out_rate, 8)
+
+
+_warned_unpriced: set[str] = set()
+
+
+def _log_unpriced(model: str) -> None:
+    """Once per model per process -- loud enough to notice, quiet enough to run."""
+    if model not in _warned_unpriced:
+        _warned_unpriced.add(model)
+        print(f"[conduit] WARNING: no price for model {model!r}; charging the "
+              f"highest known rate {_FALLBACK_RATE}. Add it to COST_TABLE.",
+              flush=True)
 
 
 # Every way a request can end. Until these were recorded the ledger was a
