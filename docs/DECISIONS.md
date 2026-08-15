@@ -158,7 +158,14 @@ Legend: ✅ RESOLVED (with the answer) · 🟡 OPEN (still needs a call)
     **Remember this decision** — flagged explicitly as easy to lose track of. Requires: a
     read endpoint (Conduit or IC) exposing current spend-today that the IC frontend can poll or
     receive over SSE. UI work not yet designed, just the requirement is locked.
-14. **✅ RESOLVED — Rate limiting is per-IP** (not per-user, not per-session) for now.
+14. **✅ RESOLVED, then REVISED in deployment — rate limiting is per `app:user`, not per-IP.**
+    Per-IP was the original call and it was wrong once Conduit moved onto Fly's private network:
+    every request arrives from the same source address, so all tenants shared a single token
+    bucket and one noisy user could throttle everyone. That is a bulkhead in name only. The
+    limiter is now keyed on the client id the caller already sends (`ic:u_a080f989a3`), which is
+    the same key the per-user spend cap uses. Proven by
+    `tests/test_dashboard.py::test_one_tenant_flooding_does_not_throttle_another` and visible on
+    the dashboard's tenant panel.
 15. **✅ RESOLVED, with a correction — cascade routing ("cheap-first, escalate on uncertainty") is
     NOT purely mechanical as originally proposed.** "How confident was the model" is a semantic
     judgment, so by the project's own content-blind test it can't live wholesale in Conduit. Split

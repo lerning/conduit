@@ -123,6 +123,23 @@ fly ssh console -a inner-council -C "curl -s http://conduit-gateway.internal:820
 
 Teardown is `fly apps destroy inner-council conduit-gateway` (plus the volumes) — cost goes to $0.
 
+## Watching it run: the operations dashboard
+
+Conduit has no public listener by design, so the dashboard is reached by tunnelling to it:
+
+```bash
+fly proxy 8200:8200 -a conduit-gateway
+# then open http://localhost:8200/v1/dashboard
+```
+
+Spend vs. the daily cap, token volume, per-tenant concentration, throttles and rejections, breaker
+states, latency percentiles. It renders the metadata-only ledger, so there is no message content in
+it to leak — which is why the route does not require the API key: the gateway is only reachable
+over 6PN or through `fly proxy`, and `fly proxy` already requires Fly account auth. Set
+`CONDUIT_DASHBOARD_ENABLED=0` to remove the route entirely.
+
+For a static copy (screen recordings, handoffs): `python -m gateway.dashboard --snapshot out.html`.
+
 ## ⚠️ Dev-mode gotcha (verified, will waste your time otherwise)
 
 **Do not use `IC_LLM_BACKEND=conduit` for offline development.** Conduit's deterministic mock

@@ -9,7 +9,9 @@ Decision mapping:
   #8  read-only 1st-> cache_enabled defaults FALSE (observability before action)
   #12 exposed+keys -> api_keys ("app:key,app2:key2"); empty = local dev, auth off
   #13 hard stop    -> global_daily_cap_usd (hard 402, no graceful degrade in v1)
-  #14 per-IP       -> ratelimit_* (token bucket keyed by client IP)
+  #14 rate limit   -> ratelimit_* (token bucket; keyed by CLIENT, see app.py --
+                      per-IP was revised away once Conduit went private, where
+                      every request arrives from one address)
   #16 fail closed  -> enforcement is in the request path; a ledger read failure
                       REFUSES the request (503) rather than proceeding uncapped
 """
@@ -60,7 +62,7 @@ class Config:
     global_daily_cap_usd: float = 5.0
     user_daily_cap_usd: float | None = None  # None = no per-user cap
 
-    # rate limiting (decision #14: per-IP token bucket)
+    # rate limiting (decision #14, revised: token bucket per `app:user`)
     ratelimit_capacity: int = 20        # burst
     ratelimit_refill_per_s: float = 2.0  # sustained rps
 
@@ -83,6 +85,11 @@ class Config:
     db_path: str | None = None
     use_real_aws: bool = False
 
+    # operations dashboard. Metadata only, and Conduit has no public listener --
+    # it is reachable only over Fly's private network or `fly proxy`, which
+    # itself requires Fly account auth. Set to 0 to remove the route entirely.
+    dashboard_enabled: bool = True
+
     @classmethod
     def from_env(cls) -> "Config":
         c = cls()
@@ -98,4 +105,5 @@ class Config:
         c.cache_ttl_s = int(os.getenv("CONDUIT_CACHE_TTL_S", "300"))
         c.db_path = os.getenv("CONDUIT_DB_PATH", "data/conduit.db")
         c.use_real_aws = os.getenv("CONDUIT_USE_REAL_AWS", "0") == "1"
+        c.dashboard_enabled = os.getenv("CONDUIT_DASHBOARD_ENABLED", "1") == "1"
         return c

@@ -22,7 +22,7 @@ import time
 from typing import AsyncIterator, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from gateway.cache.exact import ExactCache, request_hash
@@ -33,7 +33,10 @@ from gateway.ratelimit.token_bucket import TokenBucketLimiter
 from gateway.reliability.circuit_breaker import BreakerRegistry
 from gateway.routing.tiers import AllProvidersFailed, Router, UnknownTier
 from gateway.storage import get_ledger_table
-from gateway.telemetry.ledger import LedgerEntry, LedgerStore, compute_cost
+from gateway.telemetry.ledger import (OUTCOME_BAD_REQUEST, OUTCOME_CAP_GLOBAL,
+                                      OUTCOME_CAP_USER, OUTCOME_FAIL_CLOSED,
+                                      OUTCOME_PROVIDER_FAILED, OUTCOME_RATE_LIMITED,
+                                      LedgerEntry, LedgerStore, compute_cost)
 
 
 # --- provider registry --------------------------------------------------------
@@ -86,6 +89,8 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     app.state.ledger = ledger
     app.state.cache = cache
     app.state.breakers = breakers
+    app.state.providers = providers   # the router holds this same dict; the load
+                                      # drill swaps an entry to simulate an outage
 
     # --- pipeline steps as dependencies/helpers -------------------------------
     def authed_app(request: Request) -> str:
@@ -98,11 +103,32 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             raise HTTPException(401, "missing or unknown X-API-Key")
         return app_name
 
-    def rate_limited(request: Request) -> None:
-        """Step 2 (decision #14)."""
-        ip = request.client.host if request.client else "unknown"
-        if not limiter.consume(ip):
-            raise HTTPException(429, "rate limit exceeded for this IP; slow down")
+    def reject(outcome: str, code: int, detail: str, client_id: str,
+               tier: str = "") -> HTTPException:
+        """Record a refused request, then raise it.
+
+        Rejections are the whole point of having protections; a ledger that only
+        logs successes cannot answer "did we throttle anyone?". Cost is 0, so
+        these never move spend -- they are counted separately."""
+        try:
+            ledger.put(LedgerEntry(outcome=outcome, status_code=code,
+                                   client_id=client_id, cost_usd=0.0,
+                                   routing_reason=f"tier:{tier}" if tier else ""))
+        except Exception:
+            pass          # never let telemetry turn a 429 into a 500
+        return HTTPException(code, detail)
+
+    def rate_limited(client_id: str, tier: str = "") -> None:
+        """Step 2 -- keyed on CLIENT, not IP (revises decision #14).
+
+        Per-IP was a bulkhead in name only here: Conduit sits on a private
+        network with a single calling app, so every request shares one source
+        address and therefore one bucket -- one noisy tenant would throttle
+        everyone. Keying on `app:user` is what actually isolates tenants."""
+        if not limiter.consume(client_id):
+            raise reject(OUTCOME_RATE_LIMITED, 429,
+                         "rate limit exceeded for this client; slow down",
+                         client_id, tier)
 
     def enforce_spend_caps(app_name: str, user_id: str) -> None:
         """Step 4 (decisions #13, #5, #16). Fail CLOSED on ledger failure."""
@@ -111,12 +137,18 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             user_totals = (ledger.day_totals(client_prefix=f"{app_name}:{user_id}")
                            if config.user_daily_cap_usd is not None else None)
         except Exception as e:  # ledger unreadable -> refuse, never proceed uncapped
-            raise HTTPException(503, f"spend ledger unavailable; refusing (fail-closed): {e}")
+            raise reject(OUTCOME_FAIL_CLOSED, 503,
+                         f"spend ledger unavailable; refusing (fail-closed): {e}",
+                         f"{app_name}:{user_id}")
         if global_totals["spend_usd"] >= config.global_daily_cap_usd:
-            raise HTTPException(402, "daily spend limit reached; service resumes tomorrow")
+            raise reject(OUTCOME_CAP_GLOBAL, 402,
+                         "daily spend limit reached; service resumes tomorrow",
+                         f"{app_name}:{user_id}")
         if user_totals is not None and config.user_daily_cap_usd is not None \
                 and user_totals["spend_usd"] >= config.user_daily_cap_usd:
-            raise HTTPException(402, "your daily usage limit is reached; resumes tomorrow")
+            raise reject(OUTCOME_CAP_USER, 402,
+                         "your daily usage limit is reached; resumes tomorrow",
+                         f"{app_name}:{user_id}")
 
     def write_ledger(entry: LedgerEntry) -> None:
         ledger.put(entry)  # metadata only -- never message content
@@ -125,7 +157,8 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
     @app.post("/v1/complete")
     async def complete(body: CompleteBody, request: Request,
                        app_name: str = Depends(authed_app)):
-        rate_limited(request)
+        client_id = f"{app_name}:{body.user_id}"
+        rate_limited(client_id, body.tier)
         enforce_spend_caps(app_name, body.user_id)
 
         messages = [Message(role=m.role, content=m.content) for m in body.messages]
@@ -134,7 +167,6 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
                                  json_response=body.json_response)
         key = request_hash(body.tier, [m.model_dump() for m in body.messages],
                            body.max_tokens, body.temperature, body.json_response)
-        client_id = f"{app_name}:{body.user_id}"
 
         if body.stream:
             return StreamingResponse(
@@ -159,15 +191,18 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         try:
             routed = await router.complete(body.tier, creq)
         except UnknownTier as e:
-            raise HTTPException(400, str(e))
+            raise reject(OUTCOME_BAD_REQUEST, 400, str(e), client_id, body.tier)
         except AllProvidersFailed as e:
-            raise HTTPException(502, str(e))
+            raise reject(OUTCOME_PROVIDER_FAILED, 502, str(e), client_id, body.tier)
         latency_ms = (time.monotonic() - t0) * 1000
         resp = routed.response
         cost = compute_cost(resp.model, resp.usage.input_tokens, resp.usage.output_tokens)
 
         # step 8: ledger + cache write
-        entry = LedgerEntry(client_id=client_id, model=resp.model, provider=resp.provider,
+        # provider = the chain slot, matching the streaming path and the breaker
+        # registry. resp.provider is the implementation's own name and can differ.
+        entry = LedgerEntry(client_id=client_id, model=resp.model,
+                            provider=routed.provider or resp.provider,
                             input_tokens=resp.usage.input_tokens,
                             output_tokens=resp.usage.output_tokens,
                             cost_usd=cost, cache_hit=False,
@@ -250,6 +285,20 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
             out["user"] = {"user_id": user_id, **u,
                            "user_daily_cap_usd": config.user_daily_cap_usd}
         return out
+
+    if config.dashboard_enabled:
+        @app.get("/v1/dashboard", response_class=HTMLResponse)
+        def dashboard(hours: int = 24):
+            """Operations view: spend, tenant concentration, throttles, breakers.
+
+            Deliberately not behind X-API-Key: it is a browser page on a service
+            with no public listener (reachable only over 6PN or `fly proxy`,
+            which requires Fly account auth), and it renders the metadata-only
+            ledger -- there is no message content in it to leak. Kill the route
+            with CONDUIT_DASHBOARD_ENABLED=0."""
+            from gateway.dashboard import build_html
+            return HTMLResponse(build_html(ledger, config, cache, breakers,
+                                           window_h=max(1, min(hours, 24 * 30))))
 
     @app.get("/health")
     def health():

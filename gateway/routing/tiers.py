@@ -37,6 +37,11 @@ class AllProvidersFailed(Exception):
 class Routed:
     response: CompletionResponse
     routing_reason: str  # e.g. "tier:fast provider:anthropic attempt:1"
+    provider: str = ""   # the CHAIN SLOT that served it -- what breakers, failover
+                         # and the tier map are keyed on. A provider object's own
+                         # self-reported name can differ (the mock reports "mock"
+                         # whichever slot it stands in), and mixing the two splits
+                         # one provider into two rows in the ledger.
 
 
 class Router:
@@ -87,7 +92,8 @@ class Router:
                     reason += f" {note}"
                 if errors:
                     reason += f" failover_from:[{','.join(errors)}]"
-                return Routed(response=resp, routing_reason=reason)
+                return Routed(response=resp, routing_reason=reason,
+                              provider=provider_name)
             except ProviderError as e:
                 breaker.record_failure()
                 errors.append(f"{provider_name}:{type(e).__name__}")

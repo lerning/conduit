@@ -36,10 +36,27 @@ def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return round(input_tokens / 1000 * in_rate + output_tokens / 1000 * out_rate, 8)
 
 
+# Every way a request can end. Until these were recorded the ledger was a
+# SUCCESS-ONLY log: throttles and cap-hits fired and left no trace, so "did we
+# throttle anyone today?" was unanswerable and the protections were invisible.
+OUTCOME_OK = "ok"
+OUTCOME_RATE_LIMITED = "rate_limited"      # 429 -- tenant's own bucket empty
+OUTCOME_CAP_GLOBAL = "cap_global"          # 402 -- global daily ceiling
+OUTCOME_CAP_USER = "cap_user"              # 402 -- this tenant's ceiling
+OUTCOME_FAIL_CLOSED = "fail_closed"        # 503 -- ledger unreadable, refused
+OUTCOME_PROVIDER_FAILED = "provider_failed"  # 502 -- chain exhausted
+OUTCOME_BAD_REQUEST = "bad_request"        # 400 -- unknown tier etc.
+
+REJECTIONS = (OUTCOME_RATE_LIMITED, OUTCOME_CAP_GLOBAL, OUTCOME_CAP_USER,
+              OUTCOME_FAIL_CLOSED, OUTCOME_PROVIDER_FAILED, OUTCOME_BAD_REQUEST)
+
+
 @dataclass
 class LedgerEntry:
     request_id: str = field(default_factory=lambda: f"req_{uuid.uuid4().hex[:12]}")
     ts: float = field(default_factory=time.time)
+    outcome: str = OUTCOME_OK
+    status_code: int = 200
     client_id: str = "anonymous"
     model: str = ""
     provider: str = ""
@@ -107,16 +124,30 @@ class LedgerStore:
 
     def day_totals(self, client_prefix: Optional[str] = None) -> dict:
         """Spend/request totals since UTC midnight; optionally filtered by a
-        client_id prefix (e.g. an app name, or 'app:user')."""
+        client_id prefix (e.g. an app name, or 'app:user').
+
+        `requests` counts SERVED requests only. Rejections carry cost 0 so they
+        never move spend, but counting them here would make the usage meter
+        claim work that was refused."""
         start = self._day_start()
         spend = 0.0
         requests = 0
+        rejected = 0
         for item in self.scan_all():
             if float(item.get("ts", 0)) < start:
                 continue
             cid = str(item.get("client_id", ""))
             if client_prefix and not cid.startswith(client_prefix):
                 continue
+            if str(item.get("outcome", OUTCOME_OK)) in REJECTIONS:
+                rejected += 1
+                continue
             requests += 1
             spend += float(item.get("cost_usd", 0))
-        return {"spend_usd": round(spend, 6), "requests": requests}
+        return {"spend_usd": round(spend, 6), "requests": requests,
+                "rejected": rejected}
+
+    def rows_since(self, since_ts: float) -> list[dict]:
+        """All rows (served and rejected) newer than `since_ts`, oldest first."""
+        rows = [r for r in self.scan_all() if float(r.get("ts", 0)) >= since_ts]
+        return sorted(rows, key=lambda r: float(r.get("ts", 0)))

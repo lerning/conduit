@@ -24,7 +24,7 @@ integration decision log (18 decisions, all resolved) is in
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q                                  # 27 tests, all offline
+python -m pytest -q                                  # 44 tests, all offline
 uvicorn gateway.app:app --port 8200                  # start the gateway
 ```
 
@@ -39,7 +39,23 @@ curl -s -X POST localhost:8200/v1/complete -H 'Content-Type: application/json' \
 
 curl -s "localhost:8200/v1/usage?user_id=joshua"     # the spend meter
 curl -s localhost:8200/health                        # providers, tiers, breaker states
+open http://localhost:8200/v1/dashboard              # operations dashboard
 ```
+
+### Seeing the protections work
+
+A rate limiter that has never rejected anything is a claim, not evidence. The **load drill** drives
+traffic through the real app — real limiter, real caps, real breaker, real ledger — against mock
+providers, so it contacts no vendor and costs $0:
+
+```bash
+python -m gateway.load_drill --dashboard dashboards/drill.html
+```
+
+It floods one tenant (429s for them, a bystander tenant still served), pushes another past its own
+daily cap (402), and kills a provider (failover, then the breakers open, then 502). Committed
+output: [`dashboards/drill.html`](dashboards/drill.html) — snapshots from the drill carry a banner
+saying they are synthetic.
 
 ## The API
 
@@ -48,6 +64,7 @@ curl -s localhost:8200/health                        # providers, tiers, breaker
 | `POST /v1/complete` | `{tier, messages, max_tokens?, temperature?, stream?, user_id?, cache_bypass?}` → completion + cost + routing metadata. `stream: true` → SSE (`chunk`* → `final` with usage/cost/TTFT). |
 | `GET /v1/usage` | Today's spend/requests vs. the global cap (+ per-user with `?user_id=`). Built for a client UI spend meter. |
 | `GET /health` | Providers, tiers, circuit-breaker states, cache stats. |
+| `GET /v1/dashboard` | Operations page: spend vs. budget, token volume, per-tenant concentration, throttles/rejections, breaker states, latency percentiles. Rendered from the metadata-only ledger. `?hours=` to widen the window; `CONDUIT_DASHBOARD_ENABLED=0` removes the route. |
 
 **Clients request a named tier — never a model.** `fast` / `quality` / `judge` each map to an
 ordered failover chain of `(provider, model)` (override via `CONDUIT_TIER_MAP` JSON). Which model
@@ -59,7 +76,9 @@ gateway concerns, invisible to the calling app.
 ```
 request
   1. auth            per-app API key (CONDUIT_API_KEYS="ic:key1,evals:key2"; empty = dev mode)
-  2. rate limit      token bucket per client IP
+  2. rate limit      token bucket per CLIENT (app:user) — per-IP was revised away:
+                     behind a private network every request shares one address, so
+                     an IP bucket lets one noisy tenant throttle everyone (#14)
   4. spend caps      global daily hard stop + optional per-user cap — FAIL CLOSED:
                      if the ledger can't be read, requests are refused, never uncapped
   5. exact cache     sha256(tier+messages+params), TTL, per-request bypass flag
@@ -67,7 +86,9 @@ request
   6. router          tier → chain; skip open breakers; retry w/ backoff+full-jitter
                      within a provider; fail over across providers
   8. ledger          DynamoDB-shaped, metadata ONLY (tokens/cost/latency/cache-hit/model
-                     — never message content), drives the caps and the usage meter
+                     — never message content), drives the caps and the usage meter.
+                     Records REFUSALS too (429/402/503/502/400) at cost 0: a
+                     success-only log can't answer "did we throttle anyone today?"
 ```
 
 (Steps 3/7 — input/output guardrails — are the next phase; numbering kept from the spec.)
@@ -82,6 +103,8 @@ request
   defeats a drift check.
 - **Metadata-only telemetry** (privacy rule): if gateway logs became a second plaintext copy of an
   app's user content, they'd undermine whatever the app does to protect it.
+- **Tenant-keyed bulkhead** (#14, revised in deployment): isolation has to be keyed on something
+  that actually differs between tenants. On a private network, the source IP does not.
 - **Mock-always-present**: a fresh clone runs the full pipeline end-to-end with zero secrets, and
   the fault-injection seam (`MockProvider.queue_failure`) is how the chaos scenarios script
   provider outages deterministically.
