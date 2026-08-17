@@ -179,8 +179,9 @@ def build_html(ledger, config, cache, breakers, window_h: int = 24,
     concentration = (f"Concentration is the thing to watch — <strong>top tenant is "
                      f"{_pct(ranked[0][1]['spend'], spend):.0f}% of spend</strong>."
                      if ranked and spend else
-                     "Concentration is the thing to watch; there is no traffic to "
-                     "concentrate yet.")
+                     "Concentration is the thing to watch; no paid spend in this "
+                     "window yet." + (" (Drill/mock traffic below is $0 by design.)"
+                                      if ranked else ""))
 
     tenant_rows = ""
     for cid, d in ranked[:12]:
