@@ -233,3 +233,64 @@ def test_an_unpriced_model_cannot_slip_past_the_cap():
         "messages": [{"role": "user", "content": "x" * 4000}], "max_tokens": 1000})
     assert r.status_code == 200
     assert r.json()["cost_usd"] > 0          # charged, so the cap can see it
+
+
+# --- cache panel: distinguishing "broken" from "nothing repeated" ------------
+
+def test_cache_skip_reason_is_recorded():
+    client = make_client(cache_enabled=True)
+    _post(client, text="repeat me")                       # miss -> cached
+    _post(client, text="repeat me")                       # hit
+    r = client.post("/v1/complete", json={
+        "tier": "quality", "user_id": "joshua", "cache_bypass": True,
+        "messages": [{"role": "user", "content": "repeat me"}]})
+    assert r.status_code == 200
+    rows = client.app.state.ledger.scan_all()
+    skips = sorted(str(x.get("cache_skip", "")) for x in rows)
+    assert skips == ["", "bypassed", "missed"]            # hit, bypass, miss
+
+
+def test_cache_panel_separates_bypass_from_miss():
+    client = make_client(cache_enabled=True)
+    _post(client, text="alpha")                                        # miss
+    _post(client, text="alpha")                                        # hit
+    client.post("/v1/complete", json={
+        "tier": "quality", "user_id": "joshua", "cache_bypass": True,
+        "messages": [{"role": "user", "content": "beta"}]})            # bypass
+    page = _html(client)
+    assert "1 hit" in page and "1 unique miss" in page
+    assert "1 bypassed by caller" in page
+    # hit rate is over ELIGIBLE requests (hit+miss), so the bypass can't
+    # deflate it: 1 of 2 eligible = 50%, not 1 of 3 = 33%.
+    assert "50%" in page
+
+
+# --- chaos marker + drill tier: the seams the live drill stands on -----------
+
+def test_chaos_marker_downs_the_mock_and_opens_the_breaker():
+    from gateway.providers.mock import CHAOS_MARKER
+    # default tier map (includes "drill"), not the module fixture's override
+    client = TestClient(create_app(Config(breaker_failure_threshold=2,
+                                          ratelimit_capacity=50)))
+    codes = [client.post("/v1/complete", json={
+        "tier": "drill", "user_id": "d",
+        "messages": [{"role": "user", "content": f"{CHAOS_MARKER} {i}"}],
+    }).status_code for i in range(3)]
+    assert all(c == 502 for c in codes)
+    assert client.app.state.breakers.states().get("mock") == "open"
+    # and a clean request without the marker is refused only by the breaker,
+    # not by the marker logic itself
+    r = client.post("/v1/complete", json={
+        "tier": "drill", "user_id": "d",
+        "messages": [{"role": "user", "content": "clean"}]})
+    assert r.status_code == 502          # circuit still open (cooldown not elapsed)
+
+
+def test_drill_tier_exists_and_is_free():
+    client = TestClient(create_app(Config()))   # default tier map has "drill"
+    r = client.post("/v1/complete", json={
+        "tier": "drill", "user_id": "d",
+        "messages": [{"role": "user", "content": "ping"}]})
+    assert r.status_code == 200
+    assert r.json()["provider"] == "mock"
+    assert r.json()["cost_usd"] == 0.0

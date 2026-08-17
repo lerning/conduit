@@ -27,6 +27,11 @@ DEFAULT_TIER_MAP: dict[str, list[tuple[str, str]]] = {
     "fast": [("anthropic", "claude-haiku-4-5-20251001"), ("openai", "gpt-4o-mini")],
     "quality": [("anthropic", "claude-sonnet-4-6"), ("openai", "gpt-4o")],
     "judge": [("anthropic", "claude-opus-4-8")],
+    # $0 tier for exercising the deployed gateway's protections (rate limit,
+    # caps, breaker via the mock's chaos marker) without touching a vendor.
+    # Mock is always registered, so this works in every environment; auth still
+    # applies, so it is not an unauthenticated playground.
+    "drill": [("mock", "mock")],
 }
 
 

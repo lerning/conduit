@@ -145,6 +145,23 @@ def build_html(ledger, config, cache, breakers, window_h: int = 24,
     tok_in = sum(int(r.get("input_tokens", 0)) for r in served)
     tok_out = sum(int(r.get("output_tokens", 0)) for r in served)
     hits = sum(1 for r in served if r.get("cache_hit"))
+    # Why the non-hits didn't hit. "0% hit rate" alone can't distinguish
+    # "cache broken" from "nothing repeated" from "callers opted out" -- and for
+    # IC's traffic all three read differently: safety classifiers and dialogue
+    # turns SET cache_bypass on purpose (decision #6), and every conversation
+    # turn is unique, so a low hit rate here is the design working.
+    bypassed = sum(1 for r in served if r.get("cache_skip") == "bypassed")
+    streamed = sum(1 for r in served if r.get("cache_skip") == "streamed")
+    missed = sum(1 for r in served if r.get("cache_skip") == "missed")
+    # rows from before cache_skip existed have neither hit nor skip
+    unknown = len(served) - hits - bypassed - streamed - missed
+    cacheable = hits + missed          # requests the cache was allowed to serve
+    cache_note = " · ".join(
+        s for s in (
+            f"{bypassed} bypassed by caller" if bypassed else "",
+            f"{streamed} streamed (uncacheable in v1)" if streamed else "",
+            f"{unknown} predate tracking" if unknown else "",
+        ) if s) or "no bypass or stream traffic"
     cap = config.global_daily_cap_usd
     day = ledger.day_totals()
 
@@ -303,9 +320,13 @@ a.ctl.on{{color:var(--ink);border-color:var(--blue);
       <div class="v">{(tok_in+tok_out):,}</div>
       <div class="muted sm">{tok_in:,} in · {tok_out:,} out</div></div>
     <div class="card"><div class="k">cache</div>
-      <div class="v">{_pct(hits, len(served)):.0f}%</div>
-      <div class="muted sm">{hits} of {len(served)} served from cache</div></div>
+      <div class="v">{_pct(hits, cacheable):.0f}%<small> of eligible</small></div>
+      <div class="muted sm">{hits} hit · {missed} unique miss</div></div>
   </div>
+  <p class="muted sm note">Cache: exact-match, so only a repeated identical request can hit.
+  Of {len(served)} served: {hits} hit, {missed} unique misses, {cache_note}.
+  Bypasses are deliberate — the calling app opts out for safety classifiers and live dialogue
+  (a cached crisis verdict would defeat a drift check), so a low rate here is policy, not failure.</p>
   {f'<p class="muted sm note">{tok_cost_note}</p>' if tok_cost_note else ''}
 
   <h2>Token volume over time</h2>

@@ -206,6 +206,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
                             input_tokens=resp.usage.input_tokens,
                             output_tokens=resp.usage.output_tokens,
                             cost_usd=cost, cache_hit=False,
+                            cache_skip="bypassed" if body.cache_bypass else "missed",
                             latency_ms=round(latency_ms, 2),
                             routing_reason=routed.routing_reason)
         write_ledger(entry)
@@ -250,7 +251,7 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
                 cost = compute_cost(model, usage_in, usage_out)
                 entry = LedgerEntry(client_id=client_id, model=model, provider=provider_name,
                                     input_tokens=usage_in, output_tokens=usage_out,
-                                    cost_usd=cost, ttft_ms=ttft_ms,
+                                    cost_usd=cost, ttft_ms=ttft_ms, cache_skip="streamed",
                                     latency_ms=round((time.monotonic() - t0) * 1000, 2),
                                     routing_reason=f"tier:{body.tier} provider:{provider_name} stream"
                                                    + (f" {note}" if note else ""))

@@ -38,6 +38,10 @@ def succeed() -> None:
     return None
 
 
+# See MockProvider._consume_script -- the over-HTTP chaos seam for live drills.
+CHAOS_MARKER = "CHAOS_PROVIDER_DOWN"
+
+
 @dataclass
 class MockProvider:
     """Deterministic mock. `script` is an optional queue of Behaviors consumed
@@ -52,9 +56,18 @@ class MockProvider:
         for _ in range(times):
             self.script.append(behavior)
 
-    def _consume_script(self) -> None:
+    def _consume_script(self, request: CompletionRequest) -> None:
         if self.script:
             self.script.popleft()()
+        # Remote chaos seam: `queue_failure` only works in-process, but the
+        # live drill talks to a DEPLOYED gateway over HTTP. A request whose
+        # last user message carries the marker fails as if the provider were
+        # down. Only the mock honors it (drill traffic never reaches a real
+        # provider), and mock tokens cost $0 by construction.
+        last_user = next((m.content for m in reversed(request.messages)
+                          if m.role == "user"), "")
+        if CHAOS_MARKER in last_user:
+            raise ProviderUnavailable("mock: scripted outage (chaos marker)")
 
     def _deterministic_reply(self, request: CompletionRequest) -> str:
         last_user = next((m.content for m in reversed(request.messages)
@@ -70,13 +83,13 @@ class MockProvider:
         return Usage(input_tokens=in_tok, output_tokens=max(1, len(text) // 4))
 
     async def complete(self, request: CompletionRequest) -> CompletionResponse:
-        self._consume_script()
+        self._consume_script(request)
         text = self._deterministic_reply(request)
         return CompletionResponse(text=text, model=request.model, provider=self.name,
                                   usage=self._usage(request, text), stop_reason="end_turn")
 
     async def stream(self, request: CompletionRequest) -> AsyncIterator[StreamChunk]:
-        self._consume_script()
+        self._consume_script(request)
         text = self._deterministic_reply(request)
         words = re.findall(r"\S+\s*", text)
         for w in words:

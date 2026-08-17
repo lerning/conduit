@@ -97,6 +97,11 @@ class LedgerEntry:
     output_tokens: int = 0
     cost_usd: float = 0.0
     cache_hit: bool = False
+    # Why a served request did NOT come from cache. Without this, a 0% hit rate
+    # is unreadable: "nothing repeated" and "cache broken" look identical.
+    #   "" (hit or pre-bypass ledger rows) | "bypassed" (caller opted out)
+    #   | "streamed" (streams skip the exact cache in v1) | "missed" (unique)
+    cache_skip: str = ""
     ttft_ms: Optional[float] = None
     latency_ms: Optional[float] = None
     routing_reason: str = ""       # e.g. "cascade:cheap_first" | "failover:circuit_open"
