@@ -294,3 +294,47 @@ def test_drill_tier_exists_and_is_free():
     assert r.status_code == 200
     assert r.json()["provider"] == "mock"
     assert r.json()["cost_usd"] == 0.0
+
+
+# --- per-app caps: the middle layer of the bulkhead hierarchy ----------------
+
+def _keyed_client(**overrides) -> TestClient:
+    """Two apps with real keys so app attribution is exercised."""
+    cfg = Config(api_keys={"key-ic": "ic", "key-es": "spanish"},
+                 tier_map={k: list(v) for k, v in TIERS.items()}, **overrides)
+    return TestClient(create_app(cfg))
+
+
+def _post_as(client, key, user="u", text="hola"):
+    return client.post("/v1/complete",
+                       headers={"X-API-Key": key},
+                       json={"tier": "quality", "user_id": user,
+                             "messages": [{"role": "user", "content": text}]})
+
+
+def test_app_cap_blocks_only_the_app_that_spent_it():
+    client = _keyed_client(app_daily_caps={"spanish": 0.000001})
+    # spanish spends past its own cap...
+    assert _post_as(client, "key-es").status_code == 200
+    r = _post_as(client, "key-es")
+    assert r.status_code == 402
+    assert "app 'spanish'" in r.json()["detail"]
+    # ...while ic is untouched: that is the bulkhead
+    assert _post_as(client, "key-ic").status_code == 200
+
+    from gateway.telemetry.ledger import OUTCOME_CAP_APP
+    refused = [x for x in client.app.state.ledger.scan_all()
+               if str(x.get("outcome")) == OUTCOME_CAP_APP]
+    assert refused and refused[0]["client_id"].startswith("spanish:")
+
+
+def test_app_without_a_cap_is_bounded_only_by_the_global_cap():
+    client = _keyed_client(app_daily_caps={"spanish": 0.000001},
+                          global_daily_cap_usd=100.0)
+    for _ in range(3):
+        assert _post_as(client, "key-ic").status_code == 200   # ic: no app cap
+
+
+def test_app_caps_parse_from_env(monkeypatch):
+    monkeypatch.setenv("CONDUIT_APP_DAILY_CAPS", "ic:0.75, spanish:0.25")
+    assert Config.from_env().app_daily_caps == {"ic": 0.75, "spanish": 0.25}

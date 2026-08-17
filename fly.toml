@@ -26,6 +26,10 @@ primary_region = "sjc"          # change to your nearest region
   # (402), fails closed if the ledger is unreadable. Tune to taste.
   CONDUIT_GLOBAL_DAILY_CAP_USD = "1.00"
   CONDUIT_USER_DAILY_CAP_USD = "0.50"
+  # Per-app layer of the bulkhead (user -> app -> global): a runaway app can
+  # exhaust its own budget, never the whole gateway's. Add new apps here at
+  # onboarding time (scripts/onboard_app.py prints the line).
+  CONDUIT_APP_DAILY_CAPS = "ic:0.75"
   # Cache ON. Callers decide what is cacheable: Conduit honors a per-request
   # cache_bypass flag, and IC sets it for safety classifiers and creative
   # dialogue turns (decision #6). Nothing here is a blanket "cache everything".

@@ -67,6 +67,13 @@ class Config:
     global_daily_cap_usd: float = 5.0
     user_daily_cap_usd: float | None = None  # None = no per-user cap
 
+    # Per-APP caps -- the middle layer of the bulkhead hierarchy
+    # (user -> app -> global). Without it, a runaway app (bad deploy, retry
+    # loop) eats the shared global budget and takes every other app down with
+    # it. Keyed by the app name the API key maps to; apps not listed have no
+    # app-level cap. Env: CONDUIT_APP_DAILY_CAPS="ic:0.75,spanish:0.25"
+    app_daily_caps: dict[str, float] = field(default_factory=dict)
+
     # rate limiting (decision #14, revised: token bucket per `app:user`)
     ratelimit_capacity: int = 20        # burst
     ratelimit_refill_per_s: float = 2.0  # sustained rps
@@ -104,6 +111,12 @@ class Config:
         c.global_daily_cap_usd = float(os.getenv("CONDUIT_GLOBAL_DAILY_CAP_USD", "5.0"))
         if os.getenv("CONDUIT_USER_DAILY_CAP_USD"):
             c.user_daily_cap_usd = float(os.environ["CONDUIT_USER_DAILY_CAP_USD"])
+        for pair in os.getenv("CONDUIT_APP_DAILY_CAPS", "").split(","):
+            pair = pair.strip()
+            if pair:
+                app, _, cap = pair.partition(":")
+                if app and cap:
+                    c.app_daily_caps[app.strip()] = float(cap)
         c.ratelimit_capacity = int(os.getenv("CONDUIT_RATELIMIT_CAPACITY", "20"))
         c.ratelimit_refill_per_s = float(os.getenv("CONDUIT_RATELIMIT_REFILL_PER_S", "2.0"))
         c.cache_enabled = os.getenv("CONDUIT_CACHE_ENABLED", "0") == "1"

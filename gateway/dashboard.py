@@ -19,7 +19,8 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from gateway.telemetry.ledger import (OUTCOME_CAP_GLOBAL, OUTCOME_CAP_USER,
+from gateway.telemetry.ledger import (OUTCOME_CAP_APP,
+                                      OUTCOME_CAP_GLOBAL, OUTCOME_CAP_USER,
                                       OUTCOME_FAIL_CLOSED, OUTCOME_OK,
                                       OUTCOME_PROVIDER_FAILED,
                                       OUTCOME_RATE_LIMITED, REJECTIONS)
@@ -27,6 +28,7 @@ from gateway.telemetry.ledger import (OUTCOME_CAP_GLOBAL, OUTCOME_CAP_USER,
 REJECT_LABEL = {
     OUTCOME_RATE_LIMITED: "throttled (429)",
     OUTCOME_CAP_USER: "tenant cap (402)",
+    OUTCOME_CAP_APP: "app cap (402)",
     OUTCOME_CAP_GLOBAL: "global cap (402)",
     OUTCOME_PROVIDER_FAILED: "providers exhausted (502)",
     OUTCOME_FAIL_CLOSED: "fail-closed (503)",

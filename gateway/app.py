@@ -33,7 +33,8 @@ from gateway.ratelimit.token_bucket import TokenBucketLimiter
 from gateway.reliability.circuit_breaker import BreakerRegistry
 from gateway.routing.tiers import AllProvidersFailed, Router, UnknownTier
 from gateway.storage import get_ledger_table
-from gateway.telemetry.ledger import (OUTCOME_BAD_REQUEST, OUTCOME_CAP_GLOBAL,
+from gateway.telemetry.ledger import (OUTCOME_BAD_REQUEST, OUTCOME_CAP_APP,
+                                      OUTCOME_CAP_GLOBAL,
                                       OUTCOME_CAP_USER, OUTCOME_FAIL_CLOSED,
                                       OUTCOME_PROVIDER_FAILED, OUTCOME_RATE_LIMITED,
                                       LedgerEntry, LedgerStore, compute_cost)
@@ -131,9 +132,14 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
                          client_id, tier)
 
     def enforce_spend_caps(app_name: str, user_id: str) -> None:
-        """Step 4 (decisions #13, #5, #16). Fail CLOSED on ledger failure."""
+        """Step 4 (decisions #13, #5, #16 + the app layer). Fail CLOSED on
+        ledger failure. Checked outermost-in -- global, then app, then user --
+        so the response names the tightest ceiling that actually bound."""
+        app_cap = config.app_daily_caps.get(app_name)
         try:
             global_totals = ledger.day_totals()
+            app_totals = (ledger.day_totals(client_prefix=f"{app_name}:")
+                          if app_cap is not None else None)
             user_totals = (ledger.day_totals(client_prefix=f"{app_name}:{user_id}")
                            if config.user_daily_cap_usd is not None else None)
         except Exception as e:  # ledger unreadable -> refuse, never proceed uncapped
@@ -143,6 +149,12 @@ def create_app(config: Optional[Config] = None) -> FastAPI:
         if global_totals["spend_usd"] >= config.global_daily_cap_usd:
             raise reject(OUTCOME_CAP_GLOBAL, 402,
                          "daily spend limit reached; service resumes tomorrow",
+                         f"{app_name}:{user_id}")
+        if app_totals is not None and app_cap is not None \
+                and app_totals["spend_usd"] >= app_cap:
+            raise reject(OUTCOME_CAP_APP, 402,
+                         f"daily spend limit for app '{app_name}' reached; "
+                         "resumes tomorrow",
                          f"{app_name}:{user_id}")
         if user_totals is not None and config.user_daily_cap_usd is not None \
                 and user_totals["spend_usd"] >= config.user_daily_cap_usd:

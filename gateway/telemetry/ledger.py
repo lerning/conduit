@@ -75,13 +75,15 @@ def _log_unpriced(model: str) -> None:
 OUTCOME_OK = "ok"
 OUTCOME_RATE_LIMITED = "rate_limited"      # 429 -- tenant's own bucket empty
 OUTCOME_CAP_GLOBAL = "cap_global"          # 402 -- global daily ceiling
+OUTCOME_CAP_APP = "cap_app"                # 402 -- this app's ceiling
 OUTCOME_CAP_USER = "cap_user"              # 402 -- this tenant's ceiling
 OUTCOME_FAIL_CLOSED = "fail_closed"        # 503 -- ledger unreadable, refused
 OUTCOME_PROVIDER_FAILED = "provider_failed"  # 502 -- chain exhausted
 OUTCOME_BAD_REQUEST = "bad_request"        # 400 -- unknown tier etc.
 
-REJECTIONS = (OUTCOME_RATE_LIMITED, OUTCOME_CAP_GLOBAL, OUTCOME_CAP_USER,
-              OUTCOME_FAIL_CLOSED, OUTCOME_PROVIDER_FAILED, OUTCOME_BAD_REQUEST)
+REJECTIONS = (OUTCOME_RATE_LIMITED, OUTCOME_CAP_GLOBAL, OUTCOME_CAP_APP,
+              OUTCOME_CAP_USER, OUTCOME_FAIL_CLOSED, OUTCOME_PROVIDER_FAILED,
+              OUTCOME_BAD_REQUEST)
 
 
 @dataclass
